@@ -1,5 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <sys/ioctl.h>
@@ -7,65 +5,44 @@
 #include <unistd.h>
 
 int main() {
-    int fbfd = 0;
+    int fbfd = open("/dev/fb0", O_RDWR);
     struct fb_var_screeninfo vinfo;
     struct fb_fix_screeninfo finfo;
-    long screensize = 0;
-    char *fbp = 0;
-    
-    // 1. Open the framebuffer device
-    fbfd = open("/dev/fb0", O_RDWR);
-    if (fbfd == -1) {
-        perror("Error: cannot open framebuffer device");
-        return 1;
+    ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
+    ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
+
+    long screensize = vinfo.yres_virtual * finfo.line_length;
+    char *fbp = (char *)mmap(0, screensize, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+
+    // 1. Fill screen with sleek dark grey/black background
+    for (long i = 0; i < screensize; i += 4) {
+        fbp[i] = 20;   // Blue
+        fbp[i+1] = 20; // Green
+        fbp[i+2] = 20; // Red
+        fbp[i+3] = 255;
     }
 
-    // 2. Get fixed screen information
-    if (ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo) == -1) {
-        perror("Error reading fixed information");
-        close(fbfd);
-        return 1;
-    }
+    // 2. Draw a centered loading bar outline / box
+    int start_x = vinfo.xres / 2 - 150;
+    int end_x = vinfo.xres / 2 + 150;
+    int start_y = vinfo.yres / 2 - 20;
+    int end_y = vinfo.yres / 2 + 20;
 
-    // 3. Get variable screen information
-    if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo) == -1) {
-        perror("Error reading variable information");
-        close(fbfd);
-        return 1;
-    }
-
-    printf("Display active: %dx%d, %dbpp\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel);
-
-    // 4. Figure out the size of the screen in bytes
-    screensize = vinfo.yres_virtual * finfo.line_length;
-
-    // 5. Map the device to memory
-    fbp = (char *)mmap(0, screensize, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
-    if ((long)fbp == -1) {
-        perror("Error: failed to map framebuffer device to memory");
-        close(fbfd);
-        return 1;
-    }
-
-    // 6. Draw a direct pixel pattern (a gradient rectangle)
-    for (int y = 0; y < vinfo.yres; y++) {
-        for (int x = 0; x < vinfo.xres; x++) {
-            long location = (x * (vinfo.bits_per_pixel / 8)) + (y * finfo.line_length);
-            
-            if (vinfo.bits_per_pixel == 32) {
-                // BGRA or RGBA layout depending on VM setup
-                *((unsigned char *)(fbp + location + 0)) = (x * 255) / vinfo.xres; // Blue / Red channel
-                *((unsigned char *)(fbp + location + 1)) = (y * 255) / vinfo.yres; // Green channel
-                *((unsigned char *)(fbp + location + 2)) = 128;                     // Red / Blue channel
-                *((unsigned char *)(fbp + location + 3)) = 255;                     // Alpha
+    for (int y = start_y; y <= end_y; y++) {
+        for (int x = start_x; x <= end_x; x++) {
+            long loc = (x * (vinfo.bits_per_pixel / 8)) + (y * finfo.line_length);
+            // Border color: Cyan
+            if (y == start_y || y == end_y || x == start_x || x == end_x) {
+                fbp[loc] = 255; fbp[loc+1] = 255; fbp[loc+2] = 0;
+            } 
+            // Fill animation simulation: progress fill
+            else if (x < start_x + 120) {
+                fbp[loc] = 255; fbp[loc+1] = 128; fbp[loc+2] = 0; // Orange progress
             }
         }
     }
 
-    printf("Painted pixels directly to /dev/fb0! Holding for 5 seconds...\n");
-    sleep(5);
-
-    // 7. Cleanup
+    sleep(3); // Show boot screen for 3 seconds
     munmap(fbp, screensize);
     close(fbfd);
     return 0;
